@@ -16,17 +16,18 @@ with st.sidebar:
 # --- FUNKCJE DANYCH ---
 @st.cache_data
 def load_data_universal():
-    # Najpierw probujemy wczytac CSV (zalecane)
+    # 1. Próba wczytania CSV (z pominięciem 2 pierwszych wierszy - tak jak w Excelu!)
     try:
-        return pd.read_csv('data.csv', sep=None, engine='python') # sep=None wykrywa czy przecinek czy srednik
+        # header=2 oznacza, że 3 wiersz (indeks 2) to nagłówki
+        return pd.read_csv('data.csv', header=2, sep=None, engine='python')
     except:
         pass
-    
-    # Jak nie ma CSV, probujemy Excela (fallback)
+        
+    # 2. Próba wczytania Excela (fallback)
     try:
         return pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2, engine='openpyxl')
     except:
-        return pd.DataFrame() # Zwracamy pusty jak nic nie zadziala
+        return pd.DataFrame()
 def clean_data(df):
     # Standaryzacja nazw kolumn
     normalized_cols = {}
