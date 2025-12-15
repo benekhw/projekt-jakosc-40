@@ -78,7 +78,8 @@ with st.sidebar:
 @st.cache_data
 def load_data_full():
     try:
-        df = pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2)
+        # Próba wczytania z jawnym silnikiem openpyxl
+        df = pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2, engine='openpyxl')
         
         # Zmiana nazw cols
         cols = list(df.columns)
@@ -90,24 +91,15 @@ def load_data_full():
                     df.rename(columns={c: 'Status Bezpieczeństwa'}, inplace=True)
                 elif "premium" in str(c).lower():
                     df.rename(columns={c: 'Klasa jakości'}, inplace=True)
-        return df
-    except:
-        return pd.DataFrame()
-@st.cache_resource
-def train_model(df_clean):
-    try:
-        X = df_clean[['Temperatura [°C]', 'Wilgotność [%]', 'Czas pieczenia [min]']] 
-        y = df_clean['Klasa jakości'].map({'PREMIUM': 1, 'STANDARD': 0})
-        clf = DecisionTreeClassifier(max_depth=3, min_samples_leaf=1, class_weight='balanced', random_state=42)
-        clf.fit(X, y)
-        acc = accuracy_score(y, clf.predict(X))
-        return clf, acc, X.columns
-    except:
-        return None, 0, []
+        return df, None # Zwracamy df i brak błędu
+    except Exception as e:
+        return pd.DataFrame(), str(e) # Zwracamy pusty df i treść błędu
 # --- LOAD DATA ---
-df_raw = load_data_full()
+df_raw, error_msg = load_data_full()
 if df_raw.empty:
-    st.error("Brak pliku data.xlsx! Wgraj plik Excel do repozytorium.")
+    st.error(f"Wystąpił błąd podczas wczytywania pliku data.xlsx")
+    if error_msg:
+        st.code(error_msg) # POKAŻE DOKŁADNĄ PRZYCZYNĘ
     st.stop()
 # LOGIKA FILTRA (Bramka Bezpieczeństwa)
 n_total_raw = len(df_raw)
