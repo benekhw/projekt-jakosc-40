@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
-from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score
 # --- KONFIGURACJA STRONY (PREMIUM) ---
 st.set_page_config(
@@ -28,41 +27,42 @@ st.markdown("""
     .premium-title { color: #047857; font-weight: bold; font-size: 1.1rem; }
 </style>
 """, unsafe_allow_html=True)
-# --- FUNKCJE DANYCH ---
+# --- FUNKCJE DANYCH (PRZYWROCONE Z DZIALAJACEJ WERSJI) ---
 @st.cache_data
-def load_and_process_data():
-    # 1. Wczytanie
+def load_and_fix_data():
+    # 1. Wczytanie (próbujemy CSV, fallback do Excela)
     try:
+        # header=2 -> wiersz 3 to nagłówki
         df = pd.read_csv('data.csv', header=2, sep=None, engine='python')
     except:
         try:
             df = pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2, engine='openpyxl')
         except:
-            return pd.DataFrame()
+            return pd.DataFrame() # Pusty jak nic nie działa
     if df.empty: return df
-    # 2. Mapowanie
+    # 2. NAPRAWA NAZW KOLUMN (NA SZTYWNO PO INDEKSACH)
     cols = list(df.columns)
+    
+    # Mapa nowych nazw
     rename_map = {
-        cols[6]: 'Temperatura',
-        cols[7]: 'Wilgotnosc',
-        cols[9]: 'Czas',
+        cols[6]: 'Temperatura',   # "Temperatura [°C]"
+        cols[7]: 'Wilgotnosc',    # "Wilgotność [%]"
+        cols[9]: 'Czas',          # "Czas pieczenia [min]"
     }
+    
+    # Tylko jeśli mamy wystarczająco kolumn
     if len(cols) >= 14:
-        rename_map[cols[12]] = 'Status'
-        rename_map[cols[13]] = 'Jakosc'
+        rename_map[cols[12]] = 'Status'  # Ta długa nazwa "Jeśli temperatura..."
+        rename_map[cols[13]] = 'Jakosc'  # Ta długa nazwa "Jeśli produkt..."
     
     df = df.rename(columns=rename_map)
     
-    # 3. Konwersja i CZYSZCZENIE (Kluczowe dla Plotly)
+    # Konwersja numeryczna (na wszelki wypadek)
     for c in ['Temperatura', 'Wilgotnosc', 'Czas']:
         df[c] = pd.to_numeric(df[c], errors='coerce')
-    
-    # Usuwamy wiersze, gdzie kluczowe dane są NaN (to naprawia błąd Plotly)
-    df = df.dropna(subset=['Temperatura', 'Wilgotnosc', 'Czas', 'Status', 'Jakosc'])
-    
     return df
 @st.cache_resource
-def train_ai_model(df):
+def train_model(df):
     try:
         X = df[['Temperatura', 'Wilgotnosc', 'Czas']]
         y = df['Jakosc'].map({'PREMIUM': 1, 'STANDARD': 0})
@@ -72,30 +72,33 @@ def train_ai_model(df):
         return clf, acc
     except:
         return None, 0
-# --- START ---
-df_raw = load_and_process_data()
+# --- GLOWNA LOGIKA ---
+df_raw = load_and_fix_data()
 if df_raw.empty:
-    st.error("⚠️ Brak danych. Upewnij się, że plik data.csv/xlsx jest poprawny.")
+    st.error("⚠️ Brak danych. Upewnij się, że plik data.csv/xlsx jest poprawny na GitHubie.")
     st.stop()
-# --- PROCES ---
+# Filtrowanie i logika Safety Gate
 df_safe = df_raw[df_raw['Status'] == 'OK'].copy()
 df_waste = df_raw[df_raw['Status'] != 'OK'].copy()
 n_waste = len(df_waste)
 n_safe = len(df_safe)
-df_model = df_safe[df_safe['Jakosc'].isin(['PREMIUM', 'STANDARD'])].copy()
-model, accuracy = train_ai_model(df_model)
-if model is None:
-    st.warning("⚠️ Zbyt mało danych do wytrenowania modelu.")
-else:
-    n_premium = len(df_model[df_model['Jakosc'] == 'PREMIUM'])
-    ratio_premium = n_premium / len(df_model) * 100 if len(df_model) > 0 else 0
-# --- UI ---
+# Model Data (tylko poprawne klasy i pełne dane)
+df_model = df_safe[df_safe['Jakosc'].isin(['PREMIUM', 'STANDARD'])].dropna(subset=['Temperatura', 'Wilgotnosc', 'Czas', 'Jakosc'])
+model, accuracy = train_model(df_model)
+# Liczymy metryki
+n_premium = len(df_model[df_model['Jakosc'] == 'PREMIUM'])
+ratio_premium = n_premium / len(df_model) * 100 if len(df_model) > 0 else 0
+# --- INTERFEJS (PREMIUM LOOK) ---
 st.markdown('<div class="hero-title">QUALITY 4.0</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero-subtitle">System Wspierania Decyzji i Optymalizacji Procesu Wypieku</div>', unsafe_allow_html=True)
+# TABS
 tab_overview, tab_analysis, tab_sim, tab_about = st.tabs([
-    "📊 Panel Zarządczy (KPI)", "🔍 Analiza AI & Wzorce", "🎛️ Digital Twin (Symulator)", "📝 Dokumentacja"
+    "📊 Panel Zarządczy (KPI)", 
+    "🔍 Analiza AI & Wzorce", 
+    "🎛️ Digital Twin (Symulator)", 
+    "📝 Dokumentacja"
 ])
-# TAB 1: KPI
+# TAB 1: OVERVIEW
 with tab_overview:
     c1, c2, c3, c4 = st.columns(4)
     with c1: st.markdown(f"""<div class="kpi-container"><div class="kpi-value">{len(df_raw)}</div><div class="kpi-label">Wszystkie Partie</div></div>""", unsafe_allow_html=True)
@@ -106,55 +109,44 @@ with tab_overview:
     st.markdown("### 🚦 Przepływ Procesu")
     col_flow1, col_flow2, col_flow3 = st.columns(3)
     with col_flow1: st.markdown("""<div class="safety-gate"><div class="safety-title">1. INPUT</div>Monitoring IoT (Ciągły)</div>""", unsafe_allow_html=True)
-    with col_flow2: st.markdown(f"""<div class="safety-gate" style="border-color:#F59E0B;background:#FFFBEB"><div class="safety-title" style="color:#D97706">2. SAFETY GATE</div>Odrzucono: <b>{n_waste}</b></div>""", unsafe_allow_html=True)
-    with col_flow3: st.markdown(f"""<div class="premium-gate"><div class="premium-title">3. AI CLASSIFICATION</div>Premium: {n_premium}</div>""", unsafe_allow_html=True)
-# TAB 2: AI
+    with col_flow2: st.markdown(f"""<div class="safety-gate" style="border-color:#F59E0B;background:#FFFBEB"><div class="safety-title" style="color:#D97706">2. SAFETY GATE</div>Odrzucono: <b>{n_waste}</b> partii</div>""", unsafe_allow_html=True)
+    with col_flow3: st.markdown(f"""<div class="premium-gate"><div class="premium-title">3. AI CLASSIFICATION</div>Premium: {n_premium} / Standard: {len(df_model)-n_premium}</div>""", unsafe_allow_html=True)
+# TAB 2: AI ANALIZY
 with tab_analysis:
-    st.markdown("### 🧠 Odkrywanie Wiedzy")
+    st.markdown("### 🧠 Odkrywanie Wzorców")
     col_a1, col_a2 = st.columns([2, 1])
     with col_a1:
-        st.info("Zielona strefa to optymalne parametry produkcji.")
+        st.info("Złota Strefa (Zielona ramka) to obszar, w którym produkujemy klasę PREMIUM.")
         if not df_model.empty:
-            # Usunięcie template="plotly_white" dla pewności i obsługa size
-            fig_scatter = px.scatter(
-                df_model, x='Temperatura', y='Wilgotnosc', color='Jakosc',
-                size='Czas', # Size wymaga number > 0. dropna() wyzej to zapewnia, ale...
-                color_discrete_map={'PREMIUM': '#10B981', 'STANDARD': '#EF4444'},
-                title="Mapa Jakości: Temperatura vs Wilgotność (Wielkość = Czas)",
-                hover_data=['Czas']
-            )
-            # Ręczne ustawienie template w update_layout jest bezpieczniejsze
-            fig_scatter.update_layout(template="simple_white")
-            
-            # Złota strefa
-            fig_scatter.add_shape(type="rect", x0=170, y0=30, x1=185, y1=40, line=dict(color="#10B981", width=2))
-            st.plotly_chart(fig_scatter, use_container_width=True)
-    
+            # Używamy prostego scattera, który na pewno działa
+            fig = px.scatter(df_model, x='Temperatura', y='Wilgotnosc', color='Jakosc',
+                             color_discrete_map={'PREMIUM': '#10B981', 'STANDARD': '#EF4444'},
+                             title="Mapa Jakości", opacity=0.7)
+            # Dodajemy złotą ramkę
+            fig.add_shape(type="rect", x0=170, y0=30, x1=185, y1=40, line=dict(color="green", width=2))
+            st.plotly_chart(fig, use_container_width=True)
     with col_a2:
-        st.markdown("**Reguły:**")
-        st.markdown("1. **Temp:** 170-185°C (Optimum)\n2. **Wilgotność:** 30-40%\n3. **Czas:** < 50 min")
-        st.metric("Dokładność AI", f"{accuracy*100:.1f}%")
+        st.markdown("**Reguły Sukcesu:**")
+        st.markdown("1. **Temp:** 170-185°C\n2. **Wilgotność:** 30-40%\n3. **Czas:** < 50 min")
+        st.metric("Dokładność Modelu", f"{accuracy*100:.1f}%")
 # TAB 3: SYMULATOR
 with tab_sim:
     st.markdown("### 🎛️ Digital Twin")
-    col_s1, col_s2, col_s3 = st.columns(3)
-    with col_s1:
-        st.subheader("1. Ustawienia")
-        s_temp = st.slider("Temp [°C]", 150, 210, 178)
-        s_hum = st.slider("Wilgotność [%]", 10, 60, 35)
-        s_time = st.slider("Czas [min]", 30, 70, 48)
-    with col_s2:
-        st.subheader("2. Safety Gate")
-        safe = True
-        if s_temp < 160 or s_temp > 200:
-            st.error(f"⛔ ODPAD KRYTYCZNY (Temp {s_temp}°C)")
+    c_s1, c_s2, c_s3 = st.columns(3)
+    with c_s1:
+        s_t = st.slider("Temperatura", 150, 210, 178)
+        s_h = st.slider("Wilgotność", 10, 60, 35)
+        s_c = st.slider("Czas", 30, 70, 48)
+    with c_s2:
+        if s_t < 160 or s_t > 200:
+            st.error("⛔ ODPAD KRYTYCZNY (Temp)")
             safe = False
         else:
-            st.success("✅ Parametry Bezpieczne")
-    with col_s3:
-        st.subheader("3. Wynik AI")
+            st.success("✅ Parametry OK")
+            safe = True
+    with c_s3:
         if safe and model:
-            res = model.predict([[s_temp, s_hum, s_time]])[0]
+            res = model.predict([[s_t, s_h, s_c]])[0]
             if res == 1:
                 st.balloons()
                 st.success("💎 PREMIUM")
@@ -163,5 +155,5 @@ with tab_sim:
 # TAB 4: DOCS
 with tab_about:
     st.markdown("### 📄 Dokumentacja")
-    st.markdown("System analizuje parametry procesu wypieku w celu klasyfikacji jakości (Premium/Standard) i odrzucania odpadów krytycznych.")
-    st.caption("© 2024 Quality 4.0 Pro")
+    st.write("Celem projektu jest detekcja jakości przy użyciu AI. (Pełny opis w kodzie...)")
+    st.caption("© 2024 Quality 4.0")
