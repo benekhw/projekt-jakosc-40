@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 # --- KONFIGURACJA STRONY (PREMIUM DARK MODE) ---
 st.set_page_config(
@@ -62,13 +63,6 @@ st.markdown("""
         border-radius: 10px;
         border-left: 5px solid #3182CE;
     }
-    .gate-stat {
-        background-color: #2D3748; 
-        padding: 10px; 
-        border-radius: 5px; 
-        text-align: center; 
-        margin-bottom: 5px;
-    }
     /* Symulator */
     .sim-box {
         background-color: #1A1C24;
@@ -94,14 +88,13 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-# --- LOAD DATA ENGINE (SPRAWDZONY I PANCERNY) ---
+# --- LOAD DATA ENGINE (NAPRAWA FORMATU LICZB) ---
 @st.cache_data
 def load_engine():
     # 1. Próba CSV (header=2 to klucz)
     try:
         df = pd.read_csv('data.csv', header=2, sep=None, engine='python')
     except:
-        # Fallback Excel
         try:
             df = pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2, engine='openpyxl')
         except:
@@ -119,8 +112,14 @@ def load_engine():
         rename_map[cols[13]] = 'Jakosc'
     
     df = df.rename(columns=rename_map)
-    # 3. Konwersja numeryczna i czyszczenie
+    
+    # 3. Konwersja numeryczna i czyszczenie (Fix dla PL Excela: przecinki na kropki)
     for c in ['Temperatura', 'Wilgotnosc', 'Czas']:
+        # Jeśli kolumna jest typu object (napisy), zamieniamy przecinki na kropki
+        if df[c].dtype == 'object':
+            df[c] = df[c].str.replace(',', '.', regex=False)
+        
+        # Konwersja na liczby
         df[c] = pd.to_numeric(df[c], errors='coerce')
         
     return df
@@ -129,6 +128,8 @@ def train_engine(df):
     try:
         # Trenujemy tylko na pełnych danych premium/standard
         df_train = df.dropna(subset=['Temperatura', 'Wilgotnosc', 'Czas', 'Jakosc'])
+        if df_train.empty: return None
+        
         X = df_train[['Temperatura', 'Wilgotnosc', 'Czas']]
         y = df_train['Jakosc'].map({'PREMIUM': 1, 'STANDARD': 0})
         
@@ -140,13 +141,22 @@ def train_engine(df):
 # --- UI START ---
 df_raw = load_engine()
 if df_raw.empty:
-    st.error("❌ CRITICAL ERROR: Brak pliku z danymi (data.csv/xlsx). Wgraj plik na GitHub.")
+    st.error("❌ CRITICAL ERROR: Brak pliku z danymi (data.csv/xlsx). Wgraj plik na GitHub.") # Debug
+    st.stop()
+    
+# Sprawdzenie czy konwersja liczb się udała (DEBUG dla usera jeśli pusto)
+if df_raw['Temperatura'].isna().all():
+    st.error("❌ BŁĄD DANYCH: Nie udało się odczytać liczb w kolumnie Temperatura. Sprawdź czy plik CSV ma poprawny format.")
+    st.write("Podgląd surowych danych (pierwsze 5 wierszy):")
+    st.write(df_raw.head())
     st.stop()
 # LOGIKA BIZNESOWA
 df_safe = df_raw[df_raw['Status'] == 'OK'].copy()
 waste_count = len(df_raw) - len(df_safe)
-df_model = df_safe[df_safe['Jakosc'].isin(['PREMIUM', 'STANDARD'])].copy()
-df_model = df_model.dropna(subset=['Temperatura', 'Wilgotnosc', 'Czas']) # Safety dla wykresów
+# Dane do modelu
+df_model_raw = df_safe[df_safe['Jakosc'].isin(['PREMIUM', 'STANDARD'])].copy()
+# Usuwamy NaN tylko z kluczowych kolumn
+df_model = df_model_raw.dropna(subset=['Temperatura', 'Wilgotnosc', 'Czas'])
 model = train_engine(df_model)
 premium_count = len(df_model[df_model['Jakosc'] == 'PREMIUM'])
 premium_share = (premium_count / len(df_model) * 100) if len(df_model) > 0 else 0
@@ -241,6 +251,8 @@ with t1:
         )
         fig.update_traces(marker=dict(size=12, line=dict(width=1, color='white')))
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Brak danych do wygenerowania wykresu.")
 with t2:
     col_tree_desc, col_tree_viz = st.columns([1, 2])
     with col_tree_desc:
@@ -257,11 +269,12 @@ with t2:
         """)
     with col_tree_viz:
         if model:
-            from sklearn.tree import plot_tree
             fig_tree, ax = plt.subplots(figsize=(12, 6), facecolor='#0E1117')
             plot_tree(model, feature_names=['Temp', 'Wilg', 'Czas'], class_names=['STD', 'PRM'], 
                      filled=True, rounded=True, fontsize=10, ax=ax)
             st.pyplot(fig_tree)
+        else:
+             st.info("Model nie został wytrenowany (brak danych).")
 # --- SEKCJA 2: SYMULATOR ---
 st.markdown("---")
 st.subheader("2. Symulator Procesu (Digital Twin)")
@@ -283,21 +296,24 @@ with sim_col2:
         """, unsafe_allow_html=True)
         is_safe = False
     
-    if is_safe and model:
-        pred = model.predict([[s_temp, s_hum, s_time]])[0]
-        if pred == 1:
-            st.markdown("""
-            <div class="result-box-premium">
-                <h1 style="color: #10B981;">PREMIUM 💎</h1>
-                <p style="color: #10B981;">Parametry w normie. Wysoka jakość.</p>
-            </div>
-            """, unsafe_allow_html=True)
+    if is_safe:
+        if model:
+            pred = model.predict([[s_temp, s_hum, s_time]])[0]
+            if pred == 1:
+                st.markdown("""
+                <div class="result-box-premium">
+                    <h1 style="color: #10B981;">PREMIUM 💎</h1>
+                    <p style="color: #10B981;">Parametry w normie. Wysoka jakość.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="result-box-standard">
+                    <h1 style="color: #F59E0B;">STANDARD ⚠️</h1>
+                    <p style="color: #F59E0B;">Produkt bezpieczny, ale niższej jakości.</p>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.markdown("""
-            <div class="result-box-standard">
-                <h1 style="color: #F59E0B;">STANDARD ⚠️</h1>
-                <p style="color: #F59E0B;">Produkt bezpieczny, ale niższej jakości.</p>
-            </div>
-            """, unsafe_allow_html=True)
+             st.warning("Symulator nieaktywny (brak modelu).")
 st.write("")
-st.caption("System v2.0 Pro | Projekt Studencki | Analiza Danych Sp. z o.o.")
+st.caption("System v2.1 Pro | Projekt Studencki | Analiza Danych Sp. z o.o.")
