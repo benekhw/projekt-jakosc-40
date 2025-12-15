@@ -3,43 +3,42 @@ import pandas as pd
 import plotly.express as px
 import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeClassifier, plot_tree
-from sklearn.metrics import accuracy_score
 st.set_page_config(layout="wide", page_title="Projekt Jakosc 4.0")
 # --- STYLE ---
-st.markdown("""<style>.main-header {font-size: 2.5rem; text-align: center; color: #4B5563; margin-bottom: 1rem;} 
+st.markdown("""<style>
+.main-header {font-size: 2.5rem; text-align: center; color: #4B5563; margin-bottom: 1rem;} 
 .kpi-card {background-color: #F3F4F6; padding: 20px; border-radius: 10px; text-align: center;}
 </style>""", unsafe_allow_html=True)
-# --- SIDEBAR ---
-with st.sidebar:
-    st.title("Panel Kontrolny")
-    st.info("System Analizy Jakosci (Wersja Produkcyjna)")
-# --- FUNKCJE DANYCH ---
+# --- LOAD DATA ---
 @st.cache_data
-def load_data_universal():
-    # 1. Próba wczytania CSV (z pominięciem 2 pierwszych wierszy - tak jak w Excelu!)
+def load_and_fix_data():
+    # 1. Wczytanie (próbujemy CSV, fallback do Excela)
     try:
-        # header=2 oznacza, że 3 wiersz (indeks 2) to nagłówki
-        return pd.read_csv('data.csv', header=2, sep=None, engine='python')
+        # header=2 -> wiersz 3 to nagłówki
+        df = pd.read_csv('data.csv', header=2, sep=None, engine='python')
     except:
-        pass
-        
-    # 2. Próba wczytania Excela (fallback)
-    try:
-        return pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2, engine='openpyxl')
-    except:
-        return pd.DataFrame()
-def clean_data(df):
-    # Standaryzacja nazw kolumn
-    normalized_cols = {}
-    for c in df.columns:
-        c_lower = str(c).lower()
-        if "temp" in c_lower: normalized_cols[c] = 'Temperatura'
-        elif "wilg" in c_lower: normalized_cols[c] = 'Wilgotnosc'
-        elif "czas" in c_lower: normalized_cols[c] = 'Czas'
-        elif "jakosc" in c_lower or "jakość" in c_lower: normalized_cols[c] = 'Jakosc'
-        elif "odpad" in c_lower or "bezpiecz" in c_lower: normalized_cols[c] = 'Status'
+        try:
+            df = pd.read_excel('data.xlsx', sheet_name='4 - klasyfikacja', header=2, engine='openpyxl')
+        except:
+            return pd.DataFrame() # Pusty jak nic nie działa
+    if df.empty: return df
+    # 2. NAPRAWA NAZW KOLUMN (NA SZTYWNO PO INDEKSACH)
+    # Zamiast zgadywać nazwy, bierzemy po prostu kolumny nr 12 i 13
+    cols = list(df.columns)
     
-    df = df.rename(columns=normalized_cols)
+    # Mapa nowych nazw (dla pewności nadpisujemy wszystko co ważne)
+    rename_map = {
+        cols[6]: 'Temperatura',   # "Temperatura [°C]"
+        cols[7]: 'Wilgotnosc',    # "Wilgotność [%]"
+        cols[9]: 'Czas',          # "Czas pieczenia [min]"
+    }
+    
+    # Tylko jeśli mamy wystarczająco kolumn
+    if len(cols) >= 14:
+        rename_map[cols[12]] = 'Status'  # Ta długa nazwa "Jeśli temperatura..."
+        rename_map[cols[13]] = 'Jakosc'  # Ta długa nazwa "Jeśli produkt..."
+    
+    df = df.rename(columns=rename_map)
     return df
 @st.cache_resource
 def train_model(df):
@@ -51,53 +50,46 @@ def train_model(df):
         return clf
     except:
         return None
-# --- GLOWNA LOGIKA ---
-df_raw = load_data_universal()
+# --- UI LOGIC ---
+df_raw = load_and_fix_data()
 if df_raw.empty:
-    st.error("Brak danych! Wgraj plik 'data.csv' (zalecane) lub popraw 'data.xlsx' w repozytorium GitHub.")
+    st.error("Brak danych (data.csv/xlsx).")
     st.stop()
-# Czyszczenie
-df = clean_data(df_raw)
-# Sprawdzenie czy mamy wymagane kolumny
-required = ['Temperatura', 'Wilgotnosc', 'Czas', 'Jakosc', 'Status']
-missing = [c for c in required if c not in df.columns]
+# Weryfikacja czy kolumny istnieją po zmianie nazw
+required = ['Temperatura', 'Wilgotnosc', 'Czas', 'Status', 'Jakosc']
+missing = [c for c in required if c not in df_raw.columns]
 if missing:
-    st.warning(f"Nie udalo sie automatycznie rozznac kolumn: {missing}")
-    st.write("Dostepne kolumny w pliku:", list(df_raw.columns))
+    st.error(f"Nie udalo sie przypisac kolumn: {missing}")
+    st.write("Oryginalne kolumny:", list(df_raw.columns)) # Debug
     st.stop()
-# Safety Gate Logic
-n_all = len(df)
-df_safe = df[df['Status'] == 'OK'].copy()
-n_safe = len(df_safe)
-n_waste = n_all - n_safe
-# Model Data
+# Filtrowanie
+df_safe = df_raw[df_raw['Status'] == 'OK'].copy()
 df_model = df_safe[df_safe['Jakosc'].isin(['PREMIUM', 'STANDARD'])].dropna(subset=['Temperatura', 'Jakosc'])
 model = train_model(df_model)
-# --- UI ---
-st.markdown('<div class="main-header">QUALITY 4.0: SYSTEM EKSPERCKI</div>', unsafe_allow_html=True)
-# 0. BRAMKA
-c1, c2 = st.columns([3, 1])
-with c1: st.info("BRAMKA BEZPIECZENSTWA: Odsiewanie Odpadow Krytycznych")
-with c2: st.metric("Odrzucone", n_waste, delta="- RYZYKO", delta_color="inverse")
-# 1. KPI
-st.divider()
+# --- DASHBOARD ---
+st.markdown('<div class="main-header">QUALITY 4.0</div>', unsafe_allow_html=True)
+# KPI
 k1, k2, k3 = st.columns(3)
-k1.metric("Partie Handlowe", len(df_model))
-k2.metric("Srednia Temp.", f"{df_model['Temperatura'].mean():.1f} C")
-k3.metric("Srednia Wilgotnosc", f"{df_model['Wilgotnosc'].mean():.1f} %")
-# 2. MODEL
+k1.metric("Partie (OK)", len(df_model))
+k2.metric("Odpady", len(df_raw) - len(df_safe), delta="-RYZYKO", delta_color="inverse")
+k3.metric("Premium %", f"{(len(df_model[df_model['Jakosc']=='PREMIUM'])/len(df_model)*100):.1f}%")
 st.divider()
-st.subheader("Symulacja Modelu")
-sc1, sc2 = st.columns(2)
-with sc1:
-    t = st.slider("Temperatura", 150, 210, 180)
-    w = st.slider("Wilgotnosc", 10, 60, 35)
+# Wykresy
+c1, c2 = st.columns([2, 1])
+with c1:
+    st.subheader("Mapa Jakości")
+    fig = px.scatter(df_model, x='Temperatura', y='Wilgotnosc', color='Jakosc', 
+                     color_discrete_map={'PREMIUM': 'green', 'STANDARD': 'red'}, opacity=0.6)
+    st.plotly_chart(fig, use_container_width=True)
+with c2:
+    st.subheader("Symulator")
+    t = st.slider("Temp", 150, 210, 180)
+    w = st.slider("Wilg", 10, 60, 35)
     c = st.slider("Czas", 30, 70, 48)
-with sc2:
+    
     if t < 160 or t > 200:
-        st.error("ODPAD KRYTYCZNY (Temperatura poza norma)")
+        st.error("ODPAD")
     elif model:
-        res = model.predict([[t, w, c]])[0]
-        if res == 1: st.success("PREMIUM")
+        pred = model.predict([[t, w, c]])[0]
+        if pred == 1: st.success("PREMIUM") 
         else: st.warning("STANDARD")
-st.caption("Dane zaladowane poprawnie.")
