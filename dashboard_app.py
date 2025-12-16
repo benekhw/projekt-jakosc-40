@@ -180,15 +180,37 @@ with tab3:
         df_production['Cluster'] = kmeans.fit_predict(X_scaled)
         
         # Wizualizacja
-        fig_cluster = px.scatter(
-            df_production, x='Temperatura', y='Wilgotnosc', color=df_production['Cluster'].astype(str),
-            title=f"Wynik Grupowania K-Means (Podział na {k_clusters} grupy)",
-            template="plotly_dark", opacity=0.8,
-            labels={'color': 'Numer Grupy'}
-        )
-        st.plotly_chart(fig_cluster, use_container_width=True)
+        col_k1, col_k2 = st.columns([3, 1])
         
-        st.info("💡 **Wskazówka:** Zobacz, czy któraś z tych grup (kolorów) pokrywa się z *Złotą Strefą* (170-185°C)? Jeśli tak, znaczy to, że algorytm 'odkrył' przepis na jakość bez niczyjej pomocy!")
+        with col_k1:
+            fig_cluster = px.scatter(
+                df_production, x='Temperatura', y='Wilgotnosc', color=df_production['Cluster'].astype(str),
+                title=f"Wynik K-Means (k={k_clusters})",
+                template="plotly_dark", opacity=0.8,
+                labels={'color': 'Numer Grupy'}
+            )
+            st.plotly_chart(fig_cluster, use_container_width=True)
+        with col_k2:
+            st.markdown("**Profile Grup (Interpretacja):**")
+            for i in range(k_clusters):
+                cluster_data = df_production[df_production['Cluster'] == i]
+                mean_temp = cluster_data['Temperatura'].mean()
+                mean_hum = cluster_data['Wilgotnosc'].mean()
+                
+                # Prosta interpretacja
+                desc_t = "Gorąca" if mean_temp > 182 else ("Zimna" if mean_temp < 172 else "Umiarkowana")
+                desc_h = "Wilgotna" if mean_hum > 38 else ("Sucha" if mean_hum < 32 else "Normalna")
+                
+                st.markdown(f"""
+                <div style="background-color: #2D3748; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid #CBD5E0;">
+                    <strong style="color: #A0AEC0;">Grupa {i}</strong><br>
+                    <span style="font-size: 0.9em;">Strefa: <b>{desc_t} & {desc_h}</b></span><br>
+                    <span style="font-size: 0.8em;">Temp: {cluster_data['Temperatura'].min():.0f}-{cluster_data['Temperatura'].max():.0f}°C (Śr. {mean_temp:.1f})</span><br>
+                    <span style="font-size: 0.8em;">Wilg: {cluster_data['Wilgotnosc'].min():.0f}-{cluster_data['Wilgotnosc'].max():.0f}% (Śr. {mean_hum:.1f})</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+        st.info("💡 **Wskazówka:** Algorytm sam wykrył te strefy. Zobacz, która z nich pokrywa się z wymaganiami technicznymi (170-185°C, 30-40%).")
 # --- TAB 4: KLASYFIKACJA ---
 with tab4:
     st.header("Krok 4 & 6: Klasyfikacja (Drzewo Decyzyjne)")
