@@ -168,10 +168,10 @@ with tab3:
     k_clusters = st.slider("Wybierz na ile grup podzielić dane (parametr k)", 2, 5, 3)
     
     if not df_production.empty:
-        # Przygotowanie danych
-        X_cluster = df_production[['Temperatura', 'Wilgotnosc']]
+        # Przygotowanie danych (TERAZ 3 WYMIARY dla lepszej separacji)
+        X_cluster = df_production[['Temperatura', 'Wilgotnosc', 'Czas']]
         
-        # Standaryzacja (ważna dla K-Means)
+        # Standaryzacja
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_cluster)
         
@@ -179,15 +179,16 @@ with tab3:
         kmeans = KMeans(n_clusters=k_clusters, random_state=42, n_init=10)
         df_production['Cluster'] = kmeans.fit_predict(X_scaled)
         
-        # Wizualizacja
+        # Wizualizacja (Możemy zostać przy 2D Temp/Wilg, bo to główne parametry, ale kolory będą wynikać też z czasu)
         col_k1, col_k2 = st.columns([3, 1])
         
         with col_k1:
             fig_cluster = px.scatter(
                 df_production, x='Temperatura', y='Wilgotnosc', color=df_production['Cluster'].astype(str),
-                title=f"Wynik K-Means (k={k_clusters})",
+                size='Czas', # Dodajemy Czas jako wielkość punktu, żeby było widać ten 3 wymiar
+                title=f"Wynik K-Means (k={k_clusters}) - Wielkość punktu = Czas",
                 template="plotly_dark", opacity=0.8,
-                labels={'color': 'Numer Grupy'}
+                labels={'color': 'Grupa'}
             )
             st.plotly_chart(fig_cluster, use_container_width=True)
         with col_k2:
@@ -196,21 +197,26 @@ with tab3:
                 cluster_data = df_production[df_production['Cluster'] == i]
                 mean_temp = cluster_data['Temperatura'].mean()
                 mean_hum = cluster_data['Wilgotnosc'].mean()
+                mean_time = cluster_data['Czas'].mean()
                 
-                # Prosta interpretacja
-                desc_t = "Gorąca" if mean_temp > 182 else ("Zimna" if mean_temp < 172 else "Umiarkowana")
-                desc_h = "Wilgotna" if mean_hum > 38 else ("Sucha" if mean_hum < 32 else "Normalna")
+                # Interpretacja 3D
+                desc_t = "Gorąca" if mean_temp > 182 else ("Zimna" if mean_temp < 172 else "Umiark.")
+                desc_h = "Wilgotna" if mean_hum > 38 else ("Sucha" if mean_hum < 32 else "Norm.")
+                desc_c = "Szybko" if mean_time < 42 else ("Wolno" if mean_time > 52 else "Standard")
                 
                 st.markdown(f"""
                 <div style="background-color: #2D3748; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid #CBD5E0;">
                     <strong style="color: #A0AEC0;">Grupa {i}</strong><br>
-                    <span style="font-size: 0.9em;">Strefa: <b>{desc_t} & {desc_h}</b></span><br>
-                    <span style="font-size: 0.8em;">Temp: {cluster_data['Temperatura'].min():.0f}-{cluster_data['Temperatura'].max():.0f}°C (Śr. {mean_temp:.1f})</span><br>
-                    <span style="font-size: 0.8em;">Wilg: {cluster_data['Wilgotnosc'].min():.0f}-{cluster_data['Wilgotnosc'].max():.0f}% (Śr. {mean_hum:.1f})</span>
+                    <span style="font-size: 0.9em; color: #63B3ED;"><b>{desc_t} & {desc_h} ({desc_c})</b></span><br>
+                    <div style="font-size: 0.8em; margin-top:5px;">
+                        🌡️ Temp: {cluster_data['Temperatura'].min():.0f}-{cluster_data['Temperatura'].max():.0f}°C<br>
+                        💧 Wilg: {cluster_data['Wilgotnosc'].min():.0f}-{cluster_data['Wilgotnosc'].max():.0f}%<br>
+                        ⏱️ Czas: {cluster_data['Czas'].min():.0f}-{cluster_data['Czas'].max():.0f} min
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
-        st.info("💡 **Wskazówka:** Algorytm sam wykrył te strefy. Zobacz, która z nich pokrywa się z wymaganiami technicznymi (170-185°C, 30-40%).")
+        st.info("💡 **Wskazówka:** Teraz grupowanie uwzględnia też **Czas**. Duże kropki to długie wypieki. Sprawdź, czy któraś grupa to np. 'Szybkie i Gorące' (Ryzykowne)?")
 # --- TAB 4: KLASYFIKACJA ---
 with tab4:
     st.header("Krok 4 & 6: Klasyfikacja (Drzewo Decyzyjne)")
