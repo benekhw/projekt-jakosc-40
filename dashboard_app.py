@@ -94,7 +94,12 @@ with tab1:
     st.header("Krok 1: Przemysłowy Zbiór Danych")
     st.markdown("""
     **Cel:** Zrozumienie struktury danych pobieranych z sensorów IoT pieca tunelowego.
-    Dane zawierają parametry procesu (Temperatura, Wilgotność, Czas) oraz etykiety jakości.
+    
+    **Legenda Kolumn:**
+    *   `Temperatura [°C]`: Średnia temperatura w strefie wypieku.
+    *   `Wilgotnosc [%]`: Wilgotność względna w komorze pieca.
+    *   `Czas [min]`: Czas przebywania produktu w piecu (cykl).
+    *   `Jakosc`: Ocena końcowa (PREMIUM = Idealny, STANDARD = Akceptowalny).
     """)
     
     col1, col2 = st.columns([3, 1])
@@ -105,8 +110,6 @@ with tab1:
         st.subheader("Metryki Zbioru")
         st.info(f"Liczba wierszy: **{len(df_raw)}**")
         st.info(f"Liczba kolumn: **{len(df_raw.columns)}**")
-        st.write("Typy zmiennych:")
-        st.code(str(df_raw[['Temperatura', 'Wilgotnosc', 'Czas']].dtypes))
 # --- TAB 2: PREPROCESSING ---
 with tab2:
     st.header("Krok 2 & 3: Czyszczenie, Outliery i Normalizacja")
@@ -135,6 +138,11 @@ with tab2:
     
     # B. NORMALIZACJA
     st.subheader("B. Normalizacja i Statystyki")
+    st.markdown("""
+    Poniższe tabele pokazują, jak 'Safety Gate' wpływa na dane.
+    *   **Lewa Tabela (Przed):** Zawiera wartości skrajne (np. Temp 70°C lub 367°C) - to są błędy/odpady.
+    *   **Prawa Tabela (Po):** Zawiera tylko stabilny proces (Temp 160-200°C), który służy do uczenia AI.
+    """)
     df_clean = df_raw.dropna(subset=['Temperatura', 'Wilgotnosc', 'Czas', 'Jakosc', 'Status'])
     df_production = df_clean[df_clean['Status'] == 'OK'].copy()
     
@@ -149,12 +157,15 @@ with tab2:
 with tab3:
     st.header("Krok 5: Grupowanie (Clustering)")
     st.markdown("""
-    **Cel:** Sprawdzenie, czy dane naturalnie dzielą się na podgrupy (klastry) bez wiedzy o klasie jakości (Unsupervised Learning).
-    Używamy algorytmu **K-Means**.
+    **Co to są Klastry?**
+    Klastry to grupy produktów, które są do siebie **matematycznie podobne**. Algorytm *K-Means* sam zauważa, że pewne wypieki mają podobną temperaturę i wilgotność, więc wrzuca je do jednego worka.
+    
+    *   To metoda **"Bez Nauczyciela" (Unsupervised)** – komputer nie wie, który produkt jest PREMIUM, a który STANDARD.
+    *   Szuka tylko naturalnych skupisk ("Proces Zimny i Wilgotny" vs "Proces Gorący i Suchy").
     """)
     
     # Slider dla K
-    k_clusters = st.slider("Wybierz liczbę klastrów (k)", 2, 5, 3)
+    k_clusters = st.slider("Wybierz na ile grup podzielić dane (parametr k)", 2, 5, 3)
     
     if not df_production.empty:
         # Przygotowanie danych
@@ -171,13 +182,13 @@ with tab3:
         # Wizualizacja
         fig_cluster = px.scatter(
             df_production, x='Temperatura', y='Wilgotnosc', color=df_production['Cluster'].astype(str),
-            title=f"Wynik K-Means (k={k_clusters})",
+            title=f"Wynik Grupowania K-Means (Podział na {k_clusters} grupy)",
             template="plotly_dark", opacity=0.8,
-            labels={'color': 'Klaster'}
+            labels={'color': 'Numer Grupy'}
         )
         st.plotly_chart(fig_cluster, use_container_width=True)
         
-        st.info("💡 **Wniosek:** Algorytm grupuje procesy głównie ze względu na temperaturę. Sprawdź, czy któryś klaster pokrywa się z klasą PREMIUM w następnej zakładce!")
+        st.info("💡 **Wskazówka:** Zobacz, czy któraś z tych grup (kolorów) pokrywa się z *Złotą Strefą* (170-185°C)? Jeśli tak, znaczy to, że algorytm 'odkrył' przepis na jakość bez niczyjej pomocy!")
 # --- TAB 4: KLASYFIKACJA ---
 with tab4:
     st.header("Krok 4 & 6: Klasyfikacja (Drzewo Decyzyjne)")
@@ -260,7 +271,6 @@ with tab5:
                  pred = clf.predict([[s_t, s_h, s_c]])[0]
                  if pred == 1:
                      st.markdown("""<div class="result-box-premium"><h2>💎 PREMIUM</h2><p>Parametry Optymalne</p></div>""", unsafe_allow_html=True)
-                     st.balloons()
                  else:
                      st.markdown("""<div class="result-box-standard"><h2>⚠️ STANDARD</h2><p>Parametry poza Złotą Strefą</p></div>""", unsafe_allow_html=True)
             else:
